@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nano Banana - Prometheus Pro</title>
+    <style>
+        :root {
+            --gold: #ffd700;
+            --deep-blue: #050a1f;
+            --glass: rgba(255, 255, 255, 0.1);
+            --accent: #00f2ff;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100%;
+            background: var(--deep-blue);
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        /* --- UI LAYOUT --- */
+        #main-app {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at center, #0b1535 0%, #050a1f 100%);
+        }
+
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            width: 90%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .menu-icon {
+            font-size: 24px;
+            cursor: pointer;
+            padding: 10px;
+            background: var(--glass);
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .menu-icon:hover { background: rgba(255,255,255,0.2); }
+
+        /* --- CLOCK --- */
+        #big-clock {
+            font-size: 5rem;
+            font-weight: 100;
+            text-shadow: 0 0 20px rgba(255,215,0,0.3);
+            margin-bottom: 30px;
+        }
+
+        .glass-card {
+            background: var(--glass);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 25px;
+            padding: 25px;
+            width: 350px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+        }
+
+        /* --- ALARM ITEMS --- */
+        .alarm-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+
+        .alarm-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .delete-btn { color: #ff4d4d; cursor: pointer; background: none; border: none; font-weight: bold; }
+
+        /* --- CONTROLS --- */
+        .add-controls { display: flex; gap: 10px; }
+        input[type="time"] {
+            flex: 1;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--gold);
+            color: white;
+            padding: 8px;
+            border-radius: 8px;
+        }
+
+        .btn-gold {
+            background: var(--gold);
+            color: black;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        /* --- SIDEBAR MENU --- */
+        #sidebar {
+            position: fixed;
+            top: 0; left: -300px;
+            width: 280px; height: 100%;
+            background: rgba(5, 10, 31, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 40px 20px;
+            border-right: 1px solid var(--gold);
+        }
+
+        #sidebar.open { left: 0; }
+
+        .settings-group { margin-bottom: 30px; }
+        .settings-group h3 { color: var(--gold); font-size: 0.9rem; letter-spacing: 1px; }
+
+        /* --- OVERLAY --- */
+        #overlay {
+            display: none; position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.9); z-index: 2000;
+            flex-direction: column; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <div class="menu-icon" onclick="toggleMenu()">☰</div>
+        <div style="color: var(--gold); font-weight: bold; letter-spacing: 2px;">PROMETHEUS</div>
+    </div>
+
+    <div id="sidebar">
+        <div class="menu-icon" onclick="toggleMenu()" style="margin-bottom: 20px;">✕</div>
+        <div class="settings-group">
+            <h3>SOUND SETTINGS</h3>
+            <p style="font-size: 0.8rem; opacity: 0.7;">Upload Custom Alarm Sound:</p>
+            <input type="file" id="audioUpload" accept="audio/*" onchange="handleAudioUpload(event)">
+        </div>
+        <div class="settings-group">
+            <h3>PERMISSIONS</h3>
+            <button class="btn-gold" onclick="requestNotify()" style="width: 100%;">Enable Notifications</button>
+        </div>
+    </div>
+
+    <div id="main-app">
+        <div id="big-clock">00:00:00</div>
+        
+        <div class="glass-card">
+            <div class="alarm-list" id="alarmList"></div>
+            
+            <div class="add-controls">
+                <input type="time" id="newAlarmTime">
+                <button class="btn-gold" onclick="addAlarm()">+ SET ALARM</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="overlay">
+        <div style="font-size: 100px;">🍌</div>
+        <h1 id="alarmMessage" style="color:var(--gold)">SEQUENCE COMPLETE</h1>
+        <button class="btn-gold" style="padding: 20px 50px; font-size: 1.2rem;" onclick="stopAlarm()">DEACTIVATE</button>
+    </div>
+
+    <audio id="alarmSound" loop src="https://actions.google.com/sounds/v1/alarms/beep_loop.ogg"></audio>
+
+<script>
+    let alarms = JSON.parse(localStorage.getItem('bananaAlarms')) || [];
+    const audioPlayer = document.getElementById('alarmSound');
+    let vibrationInterval;
+
+    // --- MENU LOGIC ---
+    function toggleMenu() {
+        document.getElementById('sidebar').classList.toggle('open');
+    }
+
+    // --- AUDIO LOGIC ---
+    function handleAudioUpload(event) {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                audioPlayer.src = e.target.result;
+                alert("Custom sound loaded successfully!");
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+
+    // --- NOTIFICATION PERMISSION ---
+    function requestNotify() {
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") alert("System Armed: Notifications Active");
+        });
+    }
+
+    // --- ALARM CORE ---
+    function updateClock() {
+        const now = new Date();
+        const h = String(now.getHours()).padStart(2, '0');
+        const m = String(now.getMinutes()).padStart(2, '0');
+        const s = String(now.getSeconds()).padStart(2, '0');
+        const currentTime = `${h}:${m}`;
+        
+        document.getElementById('big-clock').innerText = `${h}:${m}:${s}`;
+
+        // Alarm Trigger Logic (checks every second)
+        alarms.forEach(alarm => {
+            if (alarm.time === currentTime && !alarm.triggered) {
+                triggerAlarm(alarm);
+            }
+        });
+    }
+
+    function triggerAlarm(alarm) {
+        alarm.triggered = true;
+        document.getElementById('overlay').style.display = 'flex';
+        
+        // Play Sound
+        audioPlayer.play();
+
+        // Vibrate Phone (Pattern: vibrate 500ms, pause 500ms)
+        if ("vibrate" in navigator) {
+            vibrationInterval = setInterval(() => {
+                navigator.vibrate([500, 500]);
+            }, 1000);
+        }
+
+        // Send Push Notification
+        if (Notification.permission === "granted") {
+            new Notification("NANO BANANA ALERT", {
+                body: `It is now ${alarm.time}. Time to wake up.`,
+                icon: "https://cdn-icons-png.flaticon.com/512/290/290844.png"
+            });
+        }
+    }
+
+    function stopAlarm() {
+        document.getElementById('overlay').style.display = 'none';
+        audioPlayer.pause();
+        audioPlayer.currentTime = 0;
+        clearInterval(vibrationInterval);
+        navigator.vibrate(0); // Stop vibration
+
+        // Reset all alarms so they work again tomorrow
+        // (Optional: filter out ones you only want once)
+        setTimeout(() => {
+            alarms.forEach(a => a.triggered = false);
+            renderAlarms();
+        }, 60000); // Wait 1 minute before resetting to prevent instant re-trigger
+    }
+
+    // --- UI RENDERING ---
+    function addAlarm() {
+        const timeVal = document.getElementById('newAlarmTime').value;
+        if (timeVal) {
+            alarms.push({ time: timeVal, triggered: false });
+            renderAlarms();
+        }
+    }
+
+    function deleteAlarm(index) {
+        alarms.splice(index, 1);
+        renderAlarms();
+    }
+
+    function renderAlarms() {
+        const list = document.getElementById('alarmList');
+        list.innerHTML = '';
+        alarms.sort((a,b) => a.time.localeCompare(b.time)).forEach((alarm, index) => {
+            list.innerHTML += `
+                <div class="alarm-item">
+                    <span>${alarm.time}</span>
+                    <button class="delete-btn" onclick="deleteAlarm(${index})">DELETE</button>
+                </div>
+            `;
+        });
+        localStorage.setItem('bananaAlarms', JSON.stringify(alarms));
+    }
+
+    setInterval(updateClock, 1000);
+    renderAlarms();
+</script>
+</body>
+</html>
